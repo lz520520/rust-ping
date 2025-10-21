@@ -8,7 +8,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use crate::errors::Error;
 use crate::packet::{EchoReply, EchoRequest, IcmpV4, IcmpV6, IpV4Packet, ICMP_HEADER_SIZE};
 
-const TOKEN_SIZE: usize = 24;
+const TOKEN_SIZE: usize = 32;
 const ECHO_REQUEST_BUFFER_SIZE: usize = ICMP_HEADER_SIZE + TOKEN_SIZE;
 type Token = [u8; TOKEN_SIZE];
 
@@ -90,17 +90,25 @@ fn ping_with_socktype(
         socket.set_read_timeout(Some(timeout - elapsed_time))?;
 
         let mut buffer: [u8; 2048] = [0; 2048];
-        socket.read(&mut buffer)?;
+        let n = socket.read(&mut buffer)?;
 
         let reply = if dest.is_ipv4() {
-            let ipv4_packet = match IpV4Packet::decode(&buffer) {
-                Ok(packet) => packet,
-                Err(_) => return Err(Error::DecodeV4Error.into()),
-            };
-            match EchoReply::decode::<IcmpV4>(ipv4_packet.data) {
-                Ok(reply) => reply,
-                Err(_) => continue,
+            if n == ECHO_REQUEST_BUFFER_SIZE {
+                match EchoReply::decode::<IcmpV4>(&buffer) {
+                    Ok(reply) => reply,
+                    Err(_) => continue,
+                }
+            } else {
+                let ipv4_packet = match IpV4Packet::decode(&buffer) {
+                    Ok(packet) => packet,
+                    Err(_) => return Err(Error::DecodeV4Error.into()),
+                };
+                match EchoReply::decode::<IcmpV4>(ipv4_packet.data) {
+                    Ok(reply) => reply,
+                    Err(_) => continue,
+                }
             }
+            
         } else {
             match EchoReply::decode::<IcmpV6>(&buffer) {
                 Ok(reply) => reply,
