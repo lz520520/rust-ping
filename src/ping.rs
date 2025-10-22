@@ -88,9 +88,19 @@ fn ping_with_socktype(
     let mut elapsed_time = Duration::from_secs(0);
     loop {
         socket.set_read_timeout(Some(timeout - elapsed_time))?;
-
+        // println!("wait read {:?}", elapsed_time);
         let mut buffer: [u8; 2048] = [0; 2048];
         let n = socket.read(&mut buffer)?;
+        // println!("wait read {:X?}", &buffer[..n]);
+        // fix: 将超时计算提前，避免出现读取异常数据包导致的死循环。
+        elapsed_time = match SystemTime::now().duration_since(time_start) {
+            Ok(reply) => reply,
+            Err(_) => return Err(Error::InternalError.into()),
+        };
+        if elapsed_time >= timeout {
+            let error = std::io::Error::new(std::io::ErrorKind::TimedOut, "Timeout occured");
+            return Err(Error::IoError { error: (error) });
+        }
 
         let reply = if dest.is_ipv4() {
             if n == ECHO_REQUEST_BUFFER_SIZE {
@@ -113,23 +123,11 @@ fn ping_with_socktype(
             match EchoReply::decode::<IcmpV6>(&buffer) {
                 Ok(reply) => reply,
                 Err(_) => continue,
-    }
+            }
         };
-
-        // if ident is not correct check if timeout is over
-        elapsed_time = match SystemTime::now().duration_since(time_start) {
-            Ok(reply) => reply,
-            Err(_) => return Err(Error::InternalError.into()),
-        };
-        
         if reply.ident == request.ident {
             // received correct ident
             return Ok(PingResult { elapsed_time });
-        }
-
-        if elapsed_time >= timeout {
-            let error = std::io::Error::new(std::io::ErrorKind::TimedOut, "Timeout occured");
-            return Err(Error::IoError { error: (error) });
         }
     }
 }
